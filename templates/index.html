@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>PDF Trans PPT v{{ app_version }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">v{{ app_version }}</p>
+        <h1>PDF Trans PPT</h1>
+      </div>
+      {% if result %}
+        <a class="ghost-link" href="{{ url_for('index') }}">新建转换</a>
+      {% endif %}
+    </header>
+
+    <main class="workspace">
+      <section class="panel convert-panel" aria-labelledby="convert-title">
+        <div class="section-title">
+          <h2 id="convert-title">转换任务</h2>
+          <span>{{ max_upload_size_mb }} MB</span>
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            <div class="notice-list">
+              {% for category, message in messages %}
+                <p class="notice {{ category }}">{{ message }}</p>
+              {% endfor %}
+            </div>
+          {% endif %}
+        {% endwith %}
+
+        <form action="{{ url_for('convert') }}" method="post" enctype="multipart/form-data" class="convert-form" id="convertForm">
+          <label class="file-zone" for="pdfFile">
+            <input id="pdfFile" name="pdf_file" type="file" accept="application/pdf">
+            <span class="file-icon" aria-hidden="true">PDF</span>
+            <span class="file-text">
+              <strong id="fileName">选择 PDF 文件</strong>
+              <small>单个文件上传</small>
+            </span>
+          </label>
+
+          {% if sample_exists %}
+            <label class="check-row">
+              <input type="checkbox" name="source" value="sample" id="sampleSource">
+              <span>使用项目样例 mypaper.pdf</span>
+            </label>
+          {% endif %}
+
+          <div class="field-group">
+            <label for="layout">排版</label>
+            <select id="layout" name="layout">
+              <option value="clean" selected>清爽可读</option>
+              <option value="positioned">贴近原文位置</option>
+            </select>
+          </div>
+
+          <fieldset class="segmented-field">
+            <legend>跳过页</legend>
+            <label>
+              <input type="radio" name="skip_mode" value="default" checked>
+              <span>第 29 页</span>
+            </label>
+            <label>
+              <input type="radio" name="skip_mode" value="auto">
+              <span>自动</span>
+            </label>
+            <label>
+              <input type="radio" name="skip_mode" value="all">
+              <span>全部</span>
+            </label>
+            <label>
+              <input type="radio" name="skip_mode" value="custom">
+              <span>自定义</span>
+            </label>
+          </fieldset>
+
+          <div class="field-group custom-skip" id="customSkip">
+            <label for="skipFromPage">从第几页开始跳过</label>
+            <input id="skipFromPage" name="skip_from_page" type="number" min="1" value="29">
+          </div>
+
+          <button class="primary-button" type="submit" id="submitButton">生成 PPT</button>
+        </form>
+      </section>
+
+      <section class="panel preview-panel" aria-labelledby="preview-title">
+        <div class="section-title">
+          <h2 id="preview-title">输出</h2>
+          {% if result %}
+            <span>{{ result.created_at_display }}</span>
+          {% else %}
+            <span>待生成</span>
+          {% endif %}
+        </div>
+
+        <div class="preview-shell">
+          {% if result %}
+            <img src="{{ url_for('job_preview', job_id=result.job_id) }}" alt="PDF 首页预览">
+          {% elif sample_exists %}
+            <img src="{{ url_for('sample_preview') }}" alt="样例 PDF 首页预览">
+          {% else %}
+            <div class="empty-preview">PDF</div>
+          {% endif %}
+        </div>
+
+        {% if result %}
+          <div class="result-block">
+            <div class="result-header">
+              <div>
+                <p>{{ result.original_name }}</p>
+                <h3>{{ result.download_name }}</h3>
+              </div>
+              <a class="download-button" href="{{ url_for('download', job_id=result.job_id) }}">下载</a>
+            </div>
+
+            <dl class="metrics">
+              <div>
+                <dt>PDF 页</dt>
+                <dd>{{ result.source_pages }}</dd>
+              </div>
+              <div>
+                <dt>处理页</dt>
+                <dd>{{ result.processed_pages }}</dd>
+              </div>
+              <div>
+                <dt>PPT 页</dt>
+                <dd>{{ result.slides }}</dd>
+              </div>
+              <div>
+                <dt>大小</dt>
+                <dd>{{ result.output_size_display }}</dd>
+              </div>
+            </dl>
+
+            <div class="detail-list">
+              <span>{{ result.skip_label }}</span>
+              <span>{{ "清爽可读" if result.layout == "clean" else "贴近原文位置" }}</span>
+            </div>
+          </div>
+        {% endif %}
+      </section>
+    </main>
+
+    {% if recent_jobs %}
+      <section class="recent-band" aria-labelledby="recent-title">
+        <div class="recent-inner">
+          <div class="section-title">
+            <h2 id="recent-title">最近生成</h2>
+            <span>{{ recent_jobs|length }}</span>
+          </div>
+          <div class="recent-list">
+            {% for job in recent_jobs %}
+              <article class="recent-item">
+                <div>
+                  <p>{{ job.created_at_display }}</p>
+                  <h3>{{ job.download_name }}</h3>
+                </div>
+                <div class="recent-actions">
+                  <a href="{{ url_for('job', job_id=job.job_id) }}">查看</a>
+                  <a href="{{ url_for('download', job_id=job.job_id) }}">下载</a>
+                </div>
+              </article>
+            {% endfor %}
+          </div>
+        </div>
+      </section>
+    {% endif %}
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+  </body>
+</html>

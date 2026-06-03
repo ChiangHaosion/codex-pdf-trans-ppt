@@ -5,6 +5,7 @@ import argparse
 import io
 import math
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 import fitz
@@ -22,6 +23,18 @@ TEXT_INSET_X_PT = 8
 TEXT_INSET_Y_PT = 3
 CAPACITY_SAFETY = 0.98
 IMAGE_AREA_HEIGHT_PT = 190
+APP_VERSION = "0.2.0"
+
+
+@dataclass(frozen=True)
+class ConversionSummary:
+    pdf_path: Path
+    pptx_path: Path
+    source_pages: int
+    processed_pages: int
+    skipped_from_page: int | None
+    slides: int
+    layout: str
 
 
 def pt_to_emu(value: float) -> int:
@@ -726,11 +739,20 @@ def detect_answer_start_page(doc: fitz.Document, fallback_page: int | None = 29)
     return fallback_page
 
 
-def convert_pdf_to_pptx(pdf_path: Path, pptx_path: Path, skip_from_page: int | None = 29, layout: str = "clean") -> None:
+def convert_pdf_to_pptx(
+    pdf_path: Path,
+    pptx_path: Path,
+    skip_from_page: int | None = 29,
+    layout: str = "clean",
+) -> ConversionSummary:
+    if layout not in {"clean", "positioned"}:
+        raise ValueError(f"Unsupported layout: {layout}")
+
     doc = fitz.open(pdf_path)
     if doc.page_count == 0:
         raise ValueError(f"PDF has no pages: {pdf_path}")
 
+    source_pages = doc.page_count
     slide_width_pt = 13.333333 * PDF_POINTS_PER_INCH
     slide_height_pt = 7.5 * PDF_POINTS_PER_INCH
 
@@ -742,11 +764,13 @@ def convert_pdf_to_pptx(pdf_path: Path, pptx_path: Path, skip_from_page: int | N
     if skip_from_page == 0:
         skip_from_page = detect_answer_start_page(doc)
 
-    slide_specs: list[tuple[list[dict], list[dict]]] = []
+    processed_pages = 0
+    raw_slide_specs: list[tuple[list[dict], list[dict], fitz.Rect]] = []
 
     for page_number, page in enumerate(doc, 1):
         if skip_from_page is not None and page_number >= skip_from_page:
             break
+        processed_pages += 1
         page_dict = page.get_text("dict", flags=fitz.TEXT_PRESERVE_LIGATURES | fitz.TEXT_PRESERVE_WHITESPACE)
         image_page_dict = page.get_text("dict")
         text_blocks = [block for block in page_dict.get("blocks", []) if block.get("type") == 0 and has_text(block)]
@@ -771,43 +795,45 @@ def convert_pdf_to_pptx(pdf_path: Path, pptx_path: Path, skip_from_page: int | N
         segments = merge_short_segments(segments, content_width_pt, content_height_pt, base_size=15)
 
         for segment_index, segment in enumerate(segments):
-            slide_specs.append((segment, image_blocks if segment_index == len(segments) - 1 else []))
+            raw_slide_specs.append((segment, image_blocks if segment_index == len(segments) - 1 else [], fitz.Rect(page.rect)))
 
-    slide_specs = merge_short_slide_specs(
-        slide_specs,
-        width_pt=slide_width_pt - CONTENT_MARGIN_X_PT * 2 - TEXT_INSET_X_PT * 2,
-        max_height_pt=(slide_height_pt - CONTENT_MARGIN_Y_PT * 2 - TEXT_INSET_Y_PT * 2) * CAPACITY_SAFETY,
-        base_size=15,
-    )
-    slide_specs = rebalance_short_slide_specs(
-        slide_specs,
-        width_pt=slide_width_pt - CONTENT_MARGIN_X_PT * 2 - TEXT_INSET_X_PT * 2,
-        max_height_pt=(slide_height_pt - CONTENT_MARGIN_Y_PT * 2 - TEXT_INSET_Y_PT * 2) * CAPACITY_SAFETY,
-        base_size=15,
-        min_chars=380,
-        target_chars=520,
-        max_chars=760,
-    )
-    slide_specs = merge_short_slide_specs(
-        slide_specs,
-        width_pt=slide_width_pt - CONTENT_MARGIN_X_PT * 2 - TEXT_INSET_X_PT * 2,
-        max_height_pt=(slide_height_pt - CONTENT_MARGIN_Y_PT * 2 - TEXT_INSET_Y_PT * 2) * CAPACITY_SAFETY,
-        base_size=15,
-    )
+    if layout == "clean":
+        slide_specs = [(segment, images) for segment, images, _ in raw_slide_specs]
+        slide_specs = merge_short_slide_specs(
+            slide_specs,
+            width_pt=slide_width_pt - CONTENT_MARGIN_X_PT * 2 - TEXT_INSET_X_PT * 2,
+            max_height_pt=(slide_height_pt - CONTENT_MARGIN_Y_PT * 2 - TEXT_INSET_Y_PT * 2) * CAPACITY_SAFETY,
+            base_size=15,
+        )
+        slide_specs = rebalance_short_slide_specs(
+            slide_specs,
+            width_pt=slide_width_pt - CONTENT_MARGIN_X_PT * 2 - TEXT_INSET_X_PT * 2,
+            max_height_pt=(slide_height_pt - CONTENT_MARGIN_Y_PT * 2 - TEXT_INSET_Y_PT * 2) * CAPACITY_SAFETY,
+            base_size=15,
+            min_chars=380,
+            target_chars=520,
+            max_chars=760,
+        )
+        slide_specs = merge_short_slide_specs(
+            slide_specs,
+            width_pt=slide_width_pt - CONTENT_MARGIN_X_PT * 2 - TEXT_INSET_X_PT * 2,
+            max_height_pt=(slide_height_pt - CONTENT_MARGIN_Y_PT * 2 - TEXT_INSET_Y_PT * 2) * CAPACITY_SAFETY,
+            base_size=15,
+        )
 
-    for segment, images in slide_specs:
+        for segment, images in slide_specs:
             slide = presentation.slides.add_slide(blank_layout)
-            if layout == "clean":
-                add_clean_text_slide(
-                    slide,
-                    segment,
-                    slide_width_pt,
-                    slide_height_pt,
-                    images,
-                )
-                continue
-
-            x0, y0, x1, y1 = segment_bbox(segment, page.rect)
+            add_clean_text_slide(
+                slide,
+                segment,
+                slide_width_pt,
+                slide_height_pt,
+                images,
+            )
+    else:
+        for segment, _images, page_rect in raw_slide_specs:
+            slide = presentation.slides.add_slide(blank_layout)
+            x0, y0, x1, y1 = segment_bbox(segment, page_rect)
             segment_width = max(x1 - x0, 1)
             segment_height = max(y1 - y0, 1)
             slide_margin_x = 34
@@ -826,6 +852,16 @@ def convert_pdf_to_pptx(pdf_path: Path, pptx_path: Path, skip_from_page: int | N
                 add_text_block(slide, block, scale, x0, y0, margin_left, margin_top)
 
     presentation.save(pptx_path)
+    doc.close()
+    return ConversionSummary(
+        pdf_path=pdf_path,
+        pptx_path=pptx_path,
+        source_pages=source_pages,
+        processed_pages=processed_pages,
+        skipped_from_page=skip_from_page,
+        slides=len(presentation.slides),
+        layout=layout,
+    )
 
 
 def main() -> None:

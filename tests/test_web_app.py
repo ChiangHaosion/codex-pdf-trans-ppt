@@ -106,9 +106,10 @@ def test_skip_options_use_clear_answer_page_labels(client_runtime) -> None:
 
     assert response.status_code == 200
     assert "答案页处理".encode() in response.data
-    assert "29 页起跳过".encode() in response.data
-    assert "含之后页面".encode() in response.data
+    assert "自动检测".encode() in response.data
+    assert "寻找答案页".encode() in response.data
     assert "预检查".encode() in response.data
+    assert "29 页起跳过".encode() not in response.data
     assert "<legend>跳过页</legend>".encode() not in response.data
 
 
@@ -117,7 +118,7 @@ def test_precheck_endpoint_returns_inline_answer_summary(client_runtime, monkeyp
 
     def fake_precheck(doc, skip_from_page, profile: str) -> dict:
         assert doc.page_count == 1
-        assert skip_from_page == 29
+        assert skip_from_page == 0
         assert profile == "workbook"
         return {
             "source_pages": 1,
@@ -143,7 +144,7 @@ def test_precheck_endpoint_returns_inline_answer_summary(client_runtime, monkeyp
             "pdf_file": (io.BytesIO(make_pdf_bytes()), "demo.pdf"),
             "profile": "workbook",
             "answer_mode": "inline",
-            "skip_mode": "default",
+            "skip_mode": "auto",
         },
         content_type="multipart/form-data",
     )
@@ -240,7 +241,7 @@ def test_invalid_pdf_failure_is_saved_on_job(client_runtime, monkeypatch: pytest
             "layout": "clean",
             "profile": "workbook",
             "answer_mode": "inline",
-            "skip_mode": "default",
+            "skip_mode": "auto",
         },
         content_type="multipart/form-data",
     )

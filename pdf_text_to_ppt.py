@@ -57,7 +57,7 @@ WORKBOOK_TABLE_KEYWORDS = (
 CONVERSION_PROFILES = {
     "workbook": ConversionProfile(
         name="workbook",
-        answer_fallback_page=29,
+        answer_fallback_page=None,
         answer_min_scan_page=20,
         answer_markers=("巩固训练答案",),
         answer_keyword="答案",
@@ -2218,7 +2218,7 @@ def precheck_inline_answers(
 def convert_pdf_to_pptx(
     pdf_path: Path,
     pptx_path: Path,
-    skip_from_page: int | None = 29,
+    skip_from_page: int | None = 0,
     layout: str = "clean",
     profile: str | ConversionProfile = "workbook",
     answer_mode: str = "skip",
@@ -2392,7 +2392,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Convert copyable PDF text into an editable PPTX.")
     parser.add_argument("pdf", nargs="?", default="mypaper.pdf", help="Input PDF path")
     parser.add_argument("pptx", nargs="?", default="mypaper.pptx", help="Output PPTX path")
-    parser.add_argument("--skip-from-page", type=int, default=29, help="Skip this PDF page and all following pages. Use 0 to auto-detect, -1 to keep all pages.")
+    parser.add_argument("--skip-from-page", type=int, default=0, help="Skip this PDF page and all following pages. Use 0 to auto-detect, -1 to keep all pages.")
     parser.add_argument("--layout", choices=("clean", "positioned"), default="clean", help="clean avoids overlap; positioned preserves original coordinates.")
     parser.add_argument("--profile", choices=tuple(sorted(CONVERSION_PROFILES)), default="workbook", help="Rule profile for answer-page and chart detection.")
     parser.add_argument("--answer-mode", choices=("skip", "inline"), default="skip", help="skip omits answer pages; inline places matched answers below each topic.")

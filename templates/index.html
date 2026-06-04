@@ -80,14 +80,7 @@
           <fieldset class="segmented-field">
             <legend>答案页处理</legend>
             <label>
-              <input type="radio" name="skip_mode" value="default" checked>
-              <span>
-                <strong>29 页起跳过</strong>
-                <small>含之后页面</small>
-              </span>
-            </label>
-            <label>
-              <input type="radio" name="skip_mode" value="auto">
+              <input type="radio" name="skip_mode" value="auto" checked>
               <span>
                 <strong>自动检测</strong>
                 <small>寻找答案页</small>
@@ -111,7 +104,7 @@
 
           <div class="field-group custom-skip" id="customSkip">
             <label for="skipFromPage">从第几页起跳过（含该页及之后）</label>
-            <input id="skipFromPage" name="skip_from_page" type="number" min="1" value="29">
+            <input id="skipFromPage" name="skip_from_page" type="number" min="1" placeholder="输入答案起始页">
           </div>
 
           <div class="form-actions">

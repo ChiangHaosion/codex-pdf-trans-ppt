@@ -34,13 +34,13 @@ http://127.0.0.1:5000
 ## 命令行
 
 ```bash
-.venv/bin/python pdf_text_to_ppt.py mypaper.pdf mypaper_clean_no_answers.pptx --skip-from-page 29 --layout clean --profile workbook --answer-mode skip
+.venv/bin/python pdf_text_to_ppt.py mypaper.pdf mypaper_clean_no_answers.pptx --skip-from-page 0 --layout clean --profile workbook --answer-mode skip
 ```
 
 生成题下附答案版本：
 
 ```bash
-.venv/bin/python pdf_text_to_ppt.py mypaper.pdf mypaper_answers.pptx --skip-from-page 29 --layout clean --profile workbook --answer-mode inline
+.venv/bin/python pdf_text_to_ppt.py mypaper.pdf mypaper_answers.pptx --skip-from-page 0 --layout clean --profile workbook --answer-mode inline
 ```
 
 ## 测试
@@ -52,7 +52,7 @@ http://127.0.0.1:5000
 ## 当前策略
 
 - 输出为 16:9 PPT。
-- 默认从 PDF 第 29 页起跳过（含第 29 页及之后，通常是答案页）。
+- 默认自动检测答案页；也可以手动指定答案起始页。
 - 支持 `workbook` 和 `generic` 两种转换配置。
 - 支持 `inline` 答案模式：把答案页解析为答案数据源，并插入到对应题目下方。
 - `inline` 答案解析使用动态题目分类，不再只限制固定的说明文/记叙文/非连续性文本分类。

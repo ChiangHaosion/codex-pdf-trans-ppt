@@ -69,10 +69,8 @@ def human_file_size(size: int) -> str:
 
 
 def parse_skip_from_page() -> tuple[int | None, str]:
-    mode = request.form.get("skip_mode", "default")
-    if mode == "default":
-        return 29, skip_from_page_label(29)
-    if mode == "auto":
+    mode = request.form.get("skip_mode", "auto")
+    if mode in {"auto", "default"}:
         return 0, "自动检测答案页"
     if mode == "all":
         return None, "保留全部页面"

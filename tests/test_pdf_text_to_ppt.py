@@ -150,13 +150,18 @@ def assert_inline_answers_have_fly_in_animation(pptx_path: Path) -> None:
             root = etree.fromstring(archive.read(slide_name))
             target_ids = set(
                 root.xpath(
-                    './/p:animEffect[@transition="in" and starts-with(@filter, "fly")]/p:cBhvr/p:tgtEl/p:spTgt/@spid',
+                    './/p:anim[p:cBhvr/p:attrNameLst/p:attrName="ppt_x"]/p:cBhvr/p:tgtEl/p:spTgt/@spid',
                     namespaces=namespaces,
                 )
             )
             if not target_ids:
                 continue
             assert root.xpath('.//p:cTn/p:stCondLst/p:cond[@delay="indefinite"]', namespaces=namespaces)
+            assert set(root.xpath('.//p:anim/p:cBhvr/p:attrNameLst/p:attrName/text()', namespaces=namespaces)) >= {
+                "ppt_x",
+                "ppt_y",
+            }
+            assert root.xpath('.//p:bldP[@advAuto="indefinite" and @build="whole" and @animBg="1"]', namespaces=namespaces)
             for shape in root.xpath(".//p:sp", namespaces=namespaces):
                 shape_id = shape.xpath("./p:nvSpPr/p:cNvPr/@id", namespaces=namespaces)[0]
                 text = "".join(shape.xpath(".//a:t/text()", namespaces=namespaces))

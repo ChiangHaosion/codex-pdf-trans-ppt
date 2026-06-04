@@ -1506,38 +1506,65 @@ def add_fly_in_animations(slide, shape_ids: list[int]) -> None:
         slide._element.remove(existing_timing)
 
     next_timing_id = 3
-    effect_nodes: list[str] = []
+    click_effect_nodes: list[str] = []
     build_nodes: list[str] = []
     for shape_id in shape_ids:
         wrapper_id = next_timing_id
-        effect_id = next_timing_id + 1
-        visibility_id = next_timing_id + 2
-        fly_id = next_timing_id + 3
-        next_timing_id += 4
-        effect_nodes.append(
+        inner_id = next_timing_id + 1
+        effect_id = next_timing_id + 2
+        visibility_id = next_timing_id + 3
+        x_anim_id = next_timing_id + 4
+        y_anim_id = next_timing_id + 5
+        next_timing_id += 6
+        click_effect_nodes.append(
             f"""
             <p:par>
               <p:cTn id="{wrapper_id}" fill="hold">
                 <p:stCondLst><p:cond delay="indefinite"/></p:stCondLst>
                 <p:childTnLst>
                   <p:par>
-                    <p:cTn id="{effect_id}" presetID="2" presetClass="entr" presetSubtype="4" fill="hold" grpId="0" nodeType="clickEffect">
+                    <p:cTn id="{inner_id}" fill="hold">
                       <p:stCondLst><p:cond delay="0"/></p:stCondLst>
                       <p:childTnLst>
-                        <p:set>
-                          <p:cBhvr>
-                            <p:cTn id="{visibility_id}" dur="1" fill="hold"/>
-                            <p:tgtEl><p:spTgt spid="{shape_id}"/></p:tgtEl>
-                            <p:attrNameLst><p:attrName>style.visibility</p:attrName></p:attrNameLst>
-                          </p:cBhvr>
-                          <p:to><p:strVal val="visible"/></p:to>
-                        </p:set>
-                        <p:animEffect transition="in" filter="fly(l)" prLst="dir=l">
-                          <p:cBhvr>
-                            <p:cTn id="{fly_id}" dur="{ANSWER_ANIMATION_DURATION_MS}"/>
-                            <p:tgtEl><p:spTgt spid="{shape_id}"/></p:tgtEl>
-                          </p:cBhvr>
-                        </p:animEffect>
+                        <p:par>
+                          <p:cTn id="{effect_id}" presetID="2" presetClass="entr" presetSubtype="8" fill="hold" grpId="0" nodeType="clickEffect">
+                            <p:stCondLst><p:cond delay="0"/></p:stCondLst>
+                            <p:childTnLst>
+                              <p:set>
+                                <p:cBhvr>
+                                  <p:cTn id="{visibility_id}" dur="1" fill="hold">
+                                    <p:stCondLst><p:cond delay="0"/></p:stCondLst>
+                                  </p:cTn>
+                                  <p:tgtEl><p:spTgt spid="{shape_id}"/></p:tgtEl>
+                                  <p:attrNameLst><p:attrName>style.visibility</p:attrName></p:attrNameLst>
+                                </p:cBhvr>
+                                <p:to><p:strVal val="visible"/></p:to>
+                              </p:set>
+                              <p:anim calcmode="lin" valueType="num">
+                                <p:cBhvr additive="base">
+                                  <p:cTn id="{x_anim_id}" dur="{ANSWER_ANIMATION_DURATION_MS}" fill="hold"/>
+                                  <p:tgtEl><p:spTgt spid="{shape_id}"/></p:tgtEl>
+                                  <p:attrNameLst><p:attrName>ppt_x</p:attrName></p:attrNameLst>
+                                </p:cBhvr>
+                                <p:tavLst>
+                                  <p:tav tm="0"><p:val><p:strVal val="0-#ppt_w/2"/></p:val></p:tav>
+                                  <p:tav tm="100000"><p:val><p:strVal val="#ppt_x"/></p:val></p:tav>
+                                </p:tavLst>
+                              </p:anim>
+                              <p:anim calcmode="lin" valueType="num">
+                                <p:cBhvr additive="base">
+                                  <p:cTn id="{y_anim_id}" dur="{ANSWER_ANIMATION_DURATION_MS}" fill="hold"/>
+                                  <p:tgtEl><p:spTgt spid="{shape_id}"/></p:tgtEl>
+                                  <p:attrNameLst><p:attrName>ppt_y</p:attrName></p:attrNameLst>
+                                </p:cBhvr>
+                                <p:tavLst>
+                                  <p:tav tm="0"><p:val><p:strVal val="#ppt_y"/></p:val></p:tav>
+                                  <p:tav tm="100000"><p:val><p:strVal val="#ppt_y"/></p:val></p:tav>
+                                </p:tavLst>
+                              </p:anim>
+                            </p:childTnLst>
+                          </p:cTn>
+                        </p:par>
                       </p:childTnLst>
                     </p:cTn>
                   </p:par>
@@ -1546,21 +1573,27 @@ def add_fly_in_animations(slide, shape_ids: list[int]) -> None:
             </p:par>
             """
         )
-        build_nodes.append(f'<p:bldP spid="{shape_id}" grpId="0" build="allAtOnce"/>')
+        build_nodes.append(f'<p:bldP spid="{shape_id}" grpId="0" uiExpand="0" advAuto="indefinite" build="whole" animBg="1"/>')
 
     timing = parse_xml(
         f"""
         <p:timing {nsdecls("p")}>
           <p:tnLst>
             <p:par>
-              <p:cTn id="1" dur="indefinite" restart="never" nodeType="tmRoot">
+              <p:cTn id="1" restart="never" nodeType="tmRoot">
                 <p:childTnLst>
                   <p:seq concurrent="1" nextAc="seek">
                     <p:cTn id="2" dur="indefinite" nodeType="mainSeq">
                       <p:childTnLst>
-                        {"".join(effect_nodes)}
+                        {"".join(click_effect_nodes)}
                       </p:childTnLst>
                     </p:cTn>
+                    <p:prevCondLst>
+                      <p:cond evt="onPrev" delay="0"><p:tgtEl><p:sldTgt/></p:tgtEl></p:cond>
+                    </p:prevCondLst>
+                    <p:nextCondLst>
+                      <p:cond evt="onNext" delay="0"><p:tgtEl><p:sldTgt/></p:tgtEl></p:cond>
+                    </p:nextCondLst>
                   </p:seq>
                 </p:childTnLst>
               </p:cTn>

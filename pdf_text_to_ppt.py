@@ -1518,7 +1518,7 @@ def add_fly_in_animations(slide, shape_ids: list[int]) -> None:
             f"""
             <p:par>
               <p:cTn id="{wrapper_id}" fill="hold">
-                <p:stCondLst><p:cond delay="0"/></p:stCondLst>
+                <p:stCondLst><p:cond delay="indefinite"/></p:stCondLst>
                 <p:childTnLst>
                   <p:par>
                     <p:cTn id="{effect_id}" presetID="2" presetClass="entr" presetSubtype="4" fill="hold" grpId="0" nodeType="clickEffect">
@@ -1532,7 +1532,7 @@ def add_fly_in_animations(slide, shape_ids: list[int]) -> None:
                           </p:cBhvr>
                           <p:to><p:strVal val="visible"/></p:to>
                         </p:set>
-                        <p:animEffect transition="in" filter="fly" prLst="dir=l">
+                        <p:animEffect transition="in" filter="fly(l)" prLst="dir=l">
                           <p:cBhvr>
                             <p:cTn id="{fly_id}" dur="{ANSWER_ANIMATION_DURATION_MS}"/>
                             <p:tgtEl><p:spTgt spid="{shape_id}"/></p:tgtEl>
@@ -1546,7 +1546,7 @@ def add_fly_in_animations(slide, shape_ids: list[int]) -> None:
             </p:par>
             """
         )
-        build_nodes.append(f'<p:bldP spid="{shape_id}" grpId="0"/>')
+        build_nodes.append(f'<p:bldP spid="{shape_id}" grpId="0" build="allAtOnce"/>')
 
     timing = parse_xml(
         f"""

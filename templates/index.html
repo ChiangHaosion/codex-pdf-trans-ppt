@@ -59,28 +59,58 @@
             </select>
           </div>
 
+          <div class="field-group">
+            <label for="profile">配置</label>
+            <select id="profile" name="profile">
+              {% for value, label in profiles.items() %}
+                <option value="{{ value }}" {{ "selected" if value == "workbook" else "" }}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="field-group">
+            <label for="answerMode">答案展示</label>
+            <select id="answerMode" name="answer_mode">
+              {% for value, label in answer_modes.items() %}
+                <option value="{{ value }}" {{ "selected" if value == "inline" else "" }}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
           <fieldset class="segmented-field">
-            <legend>跳过页</legend>
+            <legend>答案页处理</legend>
             <label>
               <input type="radio" name="skip_mode" value="default" checked>
-              <span>第 29 页</span>
+              <span>
+                <strong>29 页起跳过</strong>
+                <small>含之后页面</small>
+              </span>
             </label>
             <label>
               <input type="radio" name="skip_mode" value="auto">
-              <span>自动</span>
+              <span>
+                <strong>自动检测</strong>
+                <small>寻找答案页</small>
+              </span>
             </label>
             <label>
               <input type="radio" name="skip_mode" value="all">
-              <span>全部</span>
+              <span>
+                <strong>保留全部</strong>
+                <small>不跳过页面</small>
+              </span>
             </label>
             <label>
               <input type="radio" name="skip_mode" value="custom">
-              <span>自定义</span>
+              <span>
+                <strong>自定义</strong>
+                <small>输入起始页</small>
+              </span>
             </label>
           </fieldset>
 
           <div class="field-group custom-skip" id="customSkip">
-            <label for="skipFromPage">从第几页开始跳过</label>
+            <label for="skipFromPage">从第几页起跳过（含该页及之后）</label>
             <input id="skipFromPage" name="skip_from_page" type="number" min="1" value="29">
           </div>
 
@@ -88,11 +118,25 @@
         </form>
       </section>
 
-      <section class="panel preview-panel" aria-labelledby="preview-title">
+      <section
+        class="panel preview-panel"
+        aria-labelledby="preview-title"
+        {% if result %}
+          data-job-status="{{ result.status }}"
+          data-status-url="{{ url_for('job_status', job_id=result.job_id) }}"
+          data-job-url="{{ url_for('job', job_id=result.job_id) }}"
+        {% endif %}
+      >
         <div class="section-title">
           <h2 id="preview-title">输出</h2>
           {% if result %}
-            <span>{{ result.created_at_display }}</span>
+            {% if result.status == "done" %}
+              <span>{{ result.created_at_display }}</span>
+            {% elif result.status == "failed" %}
+              <span>失败</span>
+            {% else %}
+              <span>生成中</span>
+            {% endif %}
           {% else %}
             <span>待生成</span>
           {% endif %}
@@ -101,10 +145,8 @@
         <div class="preview-shell">
           {% if result %}
             <img src="{{ url_for('job_preview', job_id=result.job_id) }}" alt="PDF 首页预览">
-          {% elif sample_exists %}
-            <img src="{{ url_for('sample_preview') }}" alt="样例 PDF 首页预览">
           {% else %}
-            <div class="empty-preview">PDF</div>
+            <div class="empty-preview">PPTX</div>
           {% endif %}
         </div>
 
@@ -115,61 +157,107 @@
                 <p>{{ result.original_name }}</p>
                 <h3>{{ result.download_name }}</h3>
               </div>
-              <a class="download-button" href="{{ url_for('download', job_id=result.job_id) }}">下载</a>
+              {% if result.status in ["done", "failed"] %}
+                <div class="result-actions">
+                  {% if result.status == "done" %}
+                    <a class="download-button" href="{{ url_for('download', job_id=result.job_id) }}">下载</a>
+                  {% endif %}
+                  <form action="{{ url_for('delete_job', job_id=result.job_id) }}" method="post" data-confirm="确认删除这个生成记录？">
+                    <button class="danger-button" type="submit">删除</button>
+                  </form>
+                </div>
+              {% endif %}
             </div>
 
-            <dl class="metrics">
-              <div>
-                <dt>PDF 页</dt>
-                <dd>{{ result.source_pages }}</dd>
-              </div>
-              <div>
-                <dt>处理页</dt>
-                <dd>{{ result.processed_pages }}</dd>
-              </div>
-              <div>
-                <dt>PPT 页</dt>
-                <dd>{{ result.slides }}</dd>
-              </div>
-              <div>
-                <dt>大小</dt>
-                <dd>{{ result.output_size_display }}</dd>
-              </div>
-            </dl>
+            {% if result.status in ["queued", "running"] %}
+              <p class="status-message" id="jobStatus">{{ "等待开始转换" if result.status == "queued" else "正在生成 PPT" }}</p>
+            {% elif result.status == "failed" %}
+              <p class="notice error">{{ result.error_message }}</p>
+            {% else %}
+              <dl class="metrics">
+                <div>
+                  <dt>PDF 页</dt>
+                  <dd>{{ result.source_pages }}</dd>
+                </div>
+                <div>
+                  <dt>处理页</dt>
+                  <dd>{{ result.processed_pages }}</dd>
+                </div>
+                <div>
+                  <dt>PPT 页</dt>
+                  <dd>{{ result.slides }}</dd>
+                </div>
+                <div>
+                  <dt>大小</dt>
+                  <dd>{{ result.output_size_display }}</dd>
+                </div>
+              </dl>
+            {% endif %}
 
             <div class="detail-list">
               <span>{{ result.skip_label }}</span>
               <span>{{ "清爽可读" if result.layout == "clean" else "贴近原文位置" }}</span>
+              <span>{{ result.profile_label }}</span>
+              <span>{{ result.answer_mode_label }}</span>
+              {% if result.answer_match_label %}
+                <span>{{ result.answer_match_label }}</span>
+              {% endif %}
             </div>
           </div>
         {% endif %}
       </section>
     </main>
 
-    {% if recent_jobs %}
-      <section class="recent-band" aria-labelledby="recent-title">
-        <div class="recent-inner">
-          <div class="section-title">
-            <h2 id="recent-title">最近生成</h2>
-            <span>{{ recent_jobs|length }}</span>
-          </div>
-          <div class="recent-list">
+    <section class="generated-band" aria-labelledby="generated-title">
+      <div class="generated-inner">
+        <div class="section-title">
+          <h2 id="generated-title">已生成文件</h2>
+          <span>{{ recent_jobs|length }}</span>
+        </div>
+
+        {% if recent_jobs %}
+          <div class="generated-list">
+            <div class="generated-head" aria-hidden="true">
+              <span>文件</span>
+              <span>转换信息</span>
+              <span>输出</span>
+              <span>操作</span>
+            </div>
             {% for job in recent_jobs %}
-              <article class="recent-item">
-                <div>
+              <article class="generated-item">
+                <div class="generated-file">
                   <p>{{ job.created_at_display }}</p>
                   <h3>{{ job.download_name }}</h3>
                 </div>
-                <div class="recent-actions">
+                <div class="generated-meta">
+                  <span>{{ "清爽可读" if job.layout == "clean" else "贴近原文位置" }}</span>
+                  <span>{{ job.profile_label }}</span>
+                  <span>{{ job.answer_mode_label }}</span>
+                  {% if job.answer_match_label %}
+                    <span>{{ job.answer_match_label }}</span>
+                  {% endif %}
+                  <span>{{ job.skip_label }}</span>
+                </div>
+                <div class="generated-output">
+                  <span>{{ job.processed_pages }} 页 PDF</span>
+                  <span>{{ job.slides }} 页 PPT</span>
+                  <span>{{ job.output_size_display }}</span>
+                </div>
+                <div class="generated-actions">
                   <a href="{{ url_for('job', job_id=job.job_id) }}">查看</a>
                   <a href="{{ url_for('download', job_id=job.job_id) }}">下载</a>
+                  <form action="{{ url_for('delete_job', job_id=job.job_id) }}" method="post" data-confirm="确认删除这个生成文件？">
+                    <button class="danger-button" type="submit">删除</button>
+                  </form>
                 </div>
               </article>
             {% endfor %}
           </div>
-        </div>
-      </section>
-    {% endif %}
+        {% else %}
+          <div class="generated-empty">暂无生成文件</div>
+        {% endif %}
+      </div>
+    </section>
 
     <script src="{{ url_for('static', filename='app.js') }}"></script>
   </body>

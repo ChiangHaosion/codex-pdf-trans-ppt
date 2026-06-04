@@ -34,6 +34,15 @@ def read_metadata(output_dir: Path, location: str) -> dict:
     return json.loads((output_dir / f"{job_id}.json").read_text(encoding="utf-8"))
 
 
+def make_pdf_bytes(text: str = "demo") -> bytes:
+    doc = fitz.open()
+    page = doc.new_page(width=320, height=220)
+    page.insert_text((40, 72), text)
+    data = doc.tobytes()
+    doc.close()
+    return data
+
+
 def test_chinese_pdf_filename_upload_is_accepted(client_runtime, monkeypatch: pytest.MonkeyPatch) -> None:
     client, output_dir = client_runtime
 
@@ -72,7 +81,7 @@ def test_chinese_pdf_filename_upload_is_accepted(client_runtime, monkeypatch: py
     metadata = read_metadata(output_dir, response.headers["Location"])
     assert metadata["status"] == "done"
     assert metadata["original_name"] == "测试.pdf"
-    assert metadata["download_name"] == "测试_answers_v0.4.pptx"
+    assert metadata["download_name"] == "测试_answers_v0.5.pptx"
     assert metadata["answer_mode"] == "inline"
     assert metadata["answer_match_label"] == "答案匹配：1/1"
 
@@ -99,7 +108,51 @@ def test_skip_options_use_clear_answer_page_labels(client_runtime) -> None:
     assert "答案页处理".encode() in response.data
     assert "29 页起跳过".encode() in response.data
     assert "含之后页面".encode() in response.data
+    assert "预检查".encode() in response.data
     assert "<legend>跳过页</legend>".encode() not in response.data
+
+
+def test_precheck_endpoint_returns_inline_answer_summary(client_runtime, monkeypatch: pytest.MonkeyPatch) -> None:
+    client, _output_dir = client_runtime
+
+    def fake_precheck(doc, skip_from_page, profile: str) -> dict:
+        assert doc.page_count == 1
+        assert skip_from_page == 29
+        assert profile == "workbook"
+        return {
+            "source_pages": 1,
+            "answer_start_page": 1,
+            "processed_pages": 0,
+            "topic_count": 2,
+            "answer_count": 2,
+            "matched_answers": 2,
+            "unmatched_topics": 0,
+            "unused_answers": 0,
+            "confidence_counts": {"high": 2, "medium": 0, "low": 0, "none": 0},
+            "matches": [],
+            "unmatched_items": [],
+            "unused_answer_items": [],
+            "warnings": [],
+        }
+
+    monkeypatch.setattr(web_app, "precheck_inline_answer_document", fake_precheck)
+
+    response = client.post(
+        "/precheck",
+        data={
+            "pdf_file": (io.BytesIO(make_pdf_bytes()), "demo.pdf"),
+            "profile": "workbook",
+            "answer_mode": "inline",
+            "skip_mode": "default",
+        },
+        content_type="multipart/form-data",
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["original_name"] == "demo.pdf"
+    assert payload["precheck"]["matched_answers"] == 2
 
 
 def test_generated_files_are_rendered_in_separate_list(client_runtime) -> None:

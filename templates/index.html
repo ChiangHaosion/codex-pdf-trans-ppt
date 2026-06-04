@@ -114,7 +114,12 @@
             <input id="skipFromPage" name="skip_from_page" type="number" min="1" value="29">
           </div>
 
-          <button class="primary-button" type="submit" id="submitButton">生成 PPT</button>
+          <div class="form-actions">
+            <button class="primary-button" type="submit" id="submitButton">生成 PPT</button>
+            <button class="secondary-button" type="button" id="precheckButton" data-precheck-url="{{ url_for('precheck') }}">预检查</button>
+          </div>
+
+          <div class="precheck-panel" id="precheckPanel" hidden aria-live="polite"></div>
         </form>
       </section>
 

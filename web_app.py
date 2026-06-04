@@ -16,7 +16,13 @@ from flask import Flask, abort, flash, jsonify, redirect, render_template, reque
 from werkzeug.datastructures import FileStorage
 from werkzeug.utils import secure_filename
 
-from pdf_text_to_ppt import APP_VERSION, CONVERSION_PROFILES, ConversionSummary, convert_pdf_to_pptx
+from pdf_text_to_ppt import (
+    APP_VERSION,
+    CONVERSION_PROFILES,
+    ConversionSummary,
+    convert_pdf_to_pptx,
+    precheck_inline_answer_document,
+)
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -398,6 +404,22 @@ def render_pdf_preview(pdf_path: Path):
     return send_file(image, mimetype="image/png", max_age=60)
 
 
+def open_precheck_pdf() -> tuple[fitz.Document, str]:
+    upload = request.files.get("pdf_file")
+    use_sample = request.form.get("source") == "sample"
+
+    if upload and upload.filename:
+        original_name = display_filename(upload.filename)
+        if Path(original_name).suffix.lower() != ".pdf":
+            raise ValueError("只支持上传 PDF 文件")
+        return fitz.open(stream=upload.read(), filetype="pdf"), original_name
+
+    if use_sample and SAMPLE_PDF.exists():
+        return fitz.open(SAMPLE_PDF), SAMPLE_PDF.name
+
+    raise ValueError("请上传 PDF，或选择使用项目内置样例")
+
+
 def conversion_error_message(error: Exception) -> str:
     if isinstance(error, fitz.FileDataError):
         return "无法打开 PDF 文件，请确认文件未损坏且不是加密文件"
@@ -480,6 +502,25 @@ def convert():
         return redirect(url_for("index"))
 
     return redirect(url_for("job", job_id=job_id))
+
+
+@app.post("/precheck")
+def precheck():
+    try:
+        profile = parse_profile()
+        answer_mode = parse_answer_mode()
+        if answer_mode != "inline":
+            raise ValueError("预检查仅用于题目下方显示答案模式")
+        skip_from_page, _requested_skip_label = parse_skip_from_page()
+        doc, original_name = open_precheck_pdf()
+        try:
+            result = precheck_inline_answer_document(doc, skip_from_page=skip_from_page, profile=profile)
+        finally:
+            doc.close()
+    except Exception as error:
+        return jsonify({"ok": False, "error": conversion_error_message(error)}), 400
+
+    return jsonify({"ok": True, "original_name": original_name, "precheck": result})
 
 
 @app.get("/jobs/<job_id>")

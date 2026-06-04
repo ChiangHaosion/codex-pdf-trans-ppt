@@ -25,7 +25,7 @@ TEXT_INSET_X_PT = 8
 TEXT_INSET_Y_PT = 3
 CAPACITY_SAFETY = 0.98
 IMAGE_AREA_HEIGHT_PT = 190
-APP_VERSION = "0.4.0"
+APP_VERSION = "0.5.0"
 
 
 @dataclass(frozen=True)
@@ -77,7 +77,13 @@ CONVERSION_PROFILES = {
     ),
 }
 
-TOPIC_TITLE_RE = re.compile(r"(专题[一二三四五六七八九十]+--([^\n（]+)（(\d+)）)")
+CHINESE_NUMBER_RE = r"[\d一二三四五六七八九十百]+"
+TOPIC_TITLE_RE = re.compile(
+    rf"(专题\s*{CHINESE_NUMBER_RE}\s*[-－–—]{{1,2}}\s*([^\n（(]{{1,40}}?)\s*[（(]\s*(\d+)\s*[）)])"
+)
+GENERIC_TOPIC_LINE_RE = re.compile(
+    rf"(?m)^(?P<title>(?:第\s*(?P<number1>{CHINESE_NUMBER_RE})\s*[讲课节单元]|(?:专题|模块|单元|训练)\s*(?P<number2>{CHINESE_NUMBER_RE}))\s*[:：、.．\-\s]+\s*(?P<category>[^\n（(]{{2,40}}))$"
+)
 ANSWER_CATEGORIES = {"说明文", "记叙文", "非连续性文本"}
 NARRATIVE_TOPIC_ANSWER_KEYS = {
     3: "比喻",
@@ -131,6 +137,12 @@ INLINE_TITLE_BLUE = 0x174EB8
 INLINE_ANSWER_LEAD_RATIO = 0.52
 INLINE_MIN_STANDALONE_CHARS = 90
 ANSWER_ANIMATION_DURATION_MS = 500
+CONFIDENCE_LABELS = {
+    "high": "高",
+    "medium": "中",
+    "low": "低",
+    "none": "未匹配",
+}
 
 
 @dataclass(frozen=True)
@@ -155,6 +167,75 @@ class TopicUnit:
     number: int
     heading: str
     text: str
+
+
+@dataclass(frozen=True)
+class TopicTitleMatch:
+    title: str
+    category: str
+    number: int
+    start: int
+    end: int
+
+
+@dataclass(frozen=True)
+class ParsedAnswerUnit:
+    title: str
+    category: str
+    number: int | None
+    text: str
+    keys: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class AnswerParseResult:
+    answer_map: dict[str, str]
+    answer_units: list[ParsedAnswerUnit]
+    key_to_answer_index: dict[str, int]
+
+
+@dataclass(frozen=True)
+class TopicAnswerMatch:
+    unit: TopicUnit
+    answer_text: str
+    match_key: str | None
+    confidence: str
+    answer_index: int | None
+
+
+@dataclass(frozen=True)
+class InlineAnswerAnalysis:
+    source_pages: int
+    answer_start_page: int
+    topic_units: list[TopicUnit]
+    answer_units: list[ParsedAnswerUnit]
+    matches: list[TopicAnswerMatch]
+    unused_answer_indexes: frozenset[int]
+    warnings: tuple[str, ...]
+
+    @property
+    def processed_pages(self) -> int:
+        return self.answer_start_page - 1
+
+    @property
+    def topic_count(self) -> int:
+        return len(self.topic_units)
+
+    @property
+    def answer_count(self) -> int:
+        return len(self.answer_units)
+
+    @property
+    def matched_answers(self) -> int:
+        return sum(1 for match in self.matches if match.answer_text)
+
+    @property
+    def unmatched_topics(self) -> int:
+        return self.topic_count - self.matched_answers
+
+    @property
+    def unused_answers(self) -> int:
+        return len(self.unused_answer_indexes)
 
 
 def pt_to_emu(value: float) -> int:
@@ -459,6 +540,32 @@ def canonical_answer_key(text: str) -> str:
     return text
 
 
+def chinese_number_to_int(value: str) -> int:
+    value = value.strip()
+    if value.isdigit():
+        return int(value)
+    digits = {"零": 0, "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+    if "百" in value:
+        left, _, right = value.partition("百")
+        hundreds = digits.get(left, 1 if not left else 0)
+        return hundreds * 100 + (chinese_number_to_int(right) if right else 0)
+    if "十" in value:
+        left, _, right = value.partition("十")
+        tens = digits.get(left, 1 if not left else 0)
+        ones = digits.get(right, 0) if right else 0
+        return tens * 10 + ones
+    return digits.get(value, 0)
+
+
+def canonical_topic_title(text: str) -> str:
+    text = normalize_answer_heading(text)
+    text = re.sub(r"\s+", "", text)
+    text = text.replace("(", "（").replace(")", "）")
+    text = text.replace("－", "-").replace("–", "-").replace("—", "-")
+    text = re.sub(r"-{1,}", "--", text)
+    return text
+
+
 def extract_topic_heading(text: str) -> str:
     bracketed = re.findall(r"【([^】]+)】", text)
     if not bracketed:
@@ -468,21 +575,73 @@ def extract_topic_heading(text: str) -> str:
     return normalize_answer_heading(bracketed[0])
 
 
+def topic_title_from_pattern(match: re.Match) -> TopicTitleMatch:
+    return TopicTitleMatch(
+        title=re.sub(r"\s+", "", match.group(1).strip()),
+        category=normalize_answer_heading(match.group(2)),
+        number=int(match.group(3)),
+        start=match.start(1),
+        end=match.end(1),
+    )
+
+
+def topic_title_from_generic_line(match: re.Match) -> TopicTitleMatch:
+    raw_number = match.group("number1") or match.group("number2") or "0"
+    title = re.sub(r"\s+", " ", match.group("title").strip())
+    return TopicTitleMatch(
+        title=title,
+        category=normalize_answer_heading(match.group("category")),
+        number=chinese_number_to_int(raw_number),
+        start=match.start("title"),
+        end=match.end("title"),
+    )
+
+
+def ranges_overlap(first: tuple[int, int], second: tuple[int, int]) -> bool:
+    return max(first[0], second[0]) < min(first[1], second[1])
+
+
+def iter_topic_title_matches(text: str) -> list[TopicTitleMatch]:
+    candidates = [topic_title_from_pattern(match) for match in TOPIC_TITLE_RE.finditer(text)]
+    candidates.extend(topic_title_from_generic_line(match) for match in GENERIC_TOPIC_LINE_RE.finditer(text))
+    candidates.sort(key=lambda item: (item.start, -(item.end - item.start)))
+
+    matches: list[TopicTitleMatch] = []
+    for candidate in candidates:
+        if candidate.number <= 0 or not candidate.category:
+            continue
+        if any(ranges_overlap((candidate.start, candidate.end), (existing.start, existing.end)) for existing in matches):
+            continue
+        matches.append(candidate)
+    return matches
+
+
+def match_topic_title_line(line: str) -> TopicTitleMatch | None:
+    stripped = line.strip()
+    match = TOPIC_TITLE_RE.fullmatch(stripped)
+    if match:
+        return topic_title_from_pattern(match)
+    match = GENERIC_TOPIC_LINE_RE.fullmatch(stripped)
+    if match:
+        return topic_title_from_generic_line(match)
+    return None
+
+
 def split_topic_units(text: str) -> list[TopicUnit]:
-    matches = list(TOPIC_TITLE_RE.finditer(text))
+    matches = iter_topic_title_matches(text)
     units: list[TopicUnit] = []
     for index, match in enumerate(matches):
-        start = match.start()
-        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
-        title = match.group(1)
+        start = match.start
+        end = matches[index + 1].start if index + 1 < len(matches) else len(text)
+        title = match.title
         chunk = clean_topic_text(text[start:end], title)
         if not chunk:
             continue
         units.append(
             TopicUnit(
                 title=title,
-                category=match.group(2).strip(),
-                number=int(match.group(3)),
+                category=match.category,
+                number=match.number,
                 heading=extract_topic_heading(chunk),
                 text=chunk,
             )
@@ -491,8 +650,8 @@ def split_topic_units(text: str) -> list[TopicUnit]:
 
 
 def topic_answer_keys(unit: TopicUnit) -> list[str]:
-    keys = [unit.title]
-    if unit.category == "记叙文" and unit.number in NARRATIVE_TOPIC_ANSWER_KEYS:
+    keys = [unit.title, canonical_topic_title(unit.title)]
+    if "记叙" in unit.category and unit.number in NARRATIVE_TOPIC_ANSWER_KEYS:
         keys.append(f"{unit.category}:{canonical_answer_key(NARRATIVE_TOPIC_ANSWER_KEYS[unit.number])}")
     if unit.heading:
         keys.append(f"{unit.category}:{canonical_answer_key(unit.heading)}")
@@ -505,34 +664,93 @@ def answer_section_text(title: str, lines: list[str]) -> str:
     return f"{title}\n{body}".strip() if body else title.strip()
 
 
-def add_answer_mapping(answer_map: dict[str, str], key: str, value: str) -> None:
+def add_answer_mapping(
+    answer_map: dict[str, str],
+    key: str,
+    value: str,
+    key_to_answer_index: dict[str, int] | None = None,
+    answer_index: int | None = None,
+) -> None:
     if key and value and key not in answer_map:
         answer_map[key] = value
+        if key_to_answer_index is not None and answer_index is not None:
+            key_to_answer_index[key] = answer_index
 
 
-def add_answer_section_mappings(answer_map: dict[str, str], category: str, number: int, title: str, lines: list[str]) -> None:
+def add_answer_section_mappings(
+    answer_map: dict[str, str],
+    category: str,
+    number: int,
+    title: str,
+    lines: list[str],
+    key_to_answer_index: dict[str, int] | None = None,
+    answer_index: int | None = None,
+    topic_headings: set[str] | None = None,
+) -> tuple[str, ...]:
+    keys: list[str] = []
     section_text = answer_section_text(title, lines)
-    add_answer_mapping(answer_map, f"{category}:{number}", section_text)
-    add_answer_mapping(answer_map, f"{category}:{canonical_answer_key(title)}", section_text)
+    for key in (f"{category}:{number}", f"{category}:{canonical_answer_key(title)}"):
+        add_answer_mapping(answer_map, key, section_text, key_to_answer_index, answer_index)
+        keys.append(key)
 
+    subheadings = ANSWER_SUBHEADINGS | (topic_headings or set())
     current_subheading = ""
     current_lines: list[str] = []
     for line in lines:
         heading = normalize_answer_heading(line)
-        if heading in ANSWER_SUBHEADINGS:
+        if heading in subheadings:
             if current_subheading and current_lines:
-                add_answer_mapping(answer_map, f"{category}:{canonical_answer_key(current_subheading)}", answer_section_text(current_subheading, current_lines))
+                key = f"{category}:{canonical_answer_key(current_subheading)}"
+                add_answer_mapping(
+                    answer_map,
+                    key,
+                    answer_section_text(current_subheading, current_lines),
+                    key_to_answer_index,
+                    answer_index,
+                )
+                keys.append(key)
             current_subheading = heading
             current_lines = []
             continue
         if current_subheading:
             current_lines.append(line)
     if current_subheading and current_lines:
-        add_answer_mapping(answer_map, f"{category}:{canonical_answer_key(current_subheading)}", answer_section_text(current_subheading, current_lines))
+        key = f"{category}:{canonical_answer_key(current_subheading)}"
+        add_answer_mapping(
+            answer_map,
+            key,
+            answer_section_text(current_subheading, current_lines),
+            key_to_answer_index,
+            answer_index,
+        )
+        keys.append(key)
+    return tuple(dict.fromkeys(key for key in keys if key))
 
 
-def parse_answer_units(text: str) -> dict[str, str]:
+def answer_category_from_line(line: str, topic_categories: set[str]) -> str | None:
+    heading = normalize_answer_heading(line)
+    candidates = [
+        heading,
+        re.sub(r"(参考)?答案$", "", heading).strip(),
+        re.sub(r"(巩固训练|练习|训练)?答案$", "", heading).strip(),
+    ]
+    known_categories = topic_categories | ANSWER_CATEGORIES
+    for candidate in candidates:
+        if candidate in known_categories:
+            return candidate
+    return None
+
+
+def parse_answer_result(
+    text: str,
+    topic_categories: set[str] | None = None,
+    topic_headings: set[str] | None = None,
+) -> AnswerParseResult:
     answer_map: dict[str, str] = {}
+    answer_units: list[ParsedAnswerUnit] = []
+    key_to_answer_index: dict[str, int] = {}
+    categories = {category for category in (topic_categories or set()) if category}
+    headings = {heading for heading in (topic_headings or set()) if heading}
     current_category = ""
     current_number: int | None = None
     current_title = ""
@@ -544,7 +762,27 @@ def parse_answer_units(text: str) -> dict[str, str]:
     def flush_numbered_section() -> None:
         nonlocal current_number, current_title, current_lines
         if current_category and current_number is not None and current_title:
-            add_answer_section_mappings(answer_map, current_category, current_number, current_title, current_lines)
+            section_text = answer_section_text(current_title, current_lines)
+            answer_index = len(answer_units)
+            keys = add_answer_section_mappings(
+                answer_map,
+                current_category,
+                current_number,
+                current_title,
+                current_lines,
+                key_to_answer_index,
+                answer_index,
+                headings,
+            )
+            answer_units.append(
+                ParsedAnswerUnit(
+                    title=current_title,
+                    category=current_category,
+                    number=current_number,
+                    text=section_text,
+                    keys=keys,
+                )
+            )
         current_number = None
         current_title = ""
         current_lines = []
@@ -553,23 +791,38 @@ def parse_answer_units(text: str) -> dict[str, str]:
         nonlocal current_exact_title, current_exact_category, current_exact_number, current_lines
         if current_exact_title and current_exact_number is not None:
             section_text = answer_section_text(current_exact_title, current_lines)
-            add_answer_mapping(answer_map, current_exact_title, section_text)
-            add_answer_mapping(answer_map, f"{current_exact_category}:{current_exact_number}", section_text)
+            answer_index = len(answer_units)
+            keys = [
+                current_exact_title,
+                canonical_topic_title(current_exact_title),
+                f"{current_exact_category}:{current_exact_number}",
+            ]
+            for key in keys:
+                add_answer_mapping(answer_map, key, section_text, key_to_answer_index, answer_index)
+            answer_units.append(
+                ParsedAnswerUnit(
+                    title=current_exact_title,
+                    category=current_exact_category,
+                    number=current_exact_number,
+                    text=section_text,
+                    keys=tuple(dict.fromkeys(key for key in keys if key)),
+                )
+            )
         current_exact_title = ""
         current_exact_category = ""
         current_exact_number = None
         current_lines = []
 
     for line in clean_extracted_lines(text):
-        topic_match = TOPIC_TITLE_RE.fullmatch(line)
+        topic_match = match_topic_title_line(line)
         if topic_match:
             if current_exact_title:
                 flush_exact_section()
             else:
                 flush_numbered_section()
-            current_exact_title = topic_match.group(1)
-            current_exact_category = topic_match.group(2).strip()
-            current_exact_number = int(topic_match.group(3))
+            current_exact_title = topic_match.title
+            current_exact_category = topic_match.category
+            current_exact_number = topic_match.number
             current_category = current_exact_category
             continue
 
@@ -577,12 +830,15 @@ def parse_answer_units(text: str) -> dict[str, str]:
             current_lines.append(line)
             continue
 
-        if line in ANSWER_CATEGORIES:
+        category = answer_category_from_line(line, categories)
+        if category:
             flush_numbered_section()
-            current_category = line
+            current_category = category
             continue
 
-        numbered_match = re.match(r"^(\d+)[.．]\s*(.+)$", line)
+        numbered_match = re.match(r"^(\d+)[.．、]\s*(.+)$", line)
+        if numbered_match and not current_category and len(categories) == 1:
+            current_category = next(iter(categories))
         if numbered_match and current_category:
             flush_numbered_section()
             current_number = int(numbered_match.group(1))
@@ -597,7 +853,15 @@ def parse_answer_units(text: str) -> dict[str, str]:
         flush_exact_section()
     else:
         flush_numbered_section()
-    return answer_map
+    return AnswerParseResult(answer_map=answer_map, answer_units=answer_units, key_to_answer_index=key_to_answer_index)
+
+
+def parse_answer_units(
+    text: str,
+    topic_categories: set[str] | None = None,
+    topic_headings: set[str] | None = None,
+) -> dict[str, str]:
+    return parse_answer_result(text, topic_categories=topic_categories, topic_headings=topic_headings).answer_map
 
 
 def split_answer_parts(answer_text: str) -> tuple[str, str]:
@@ -663,12 +927,105 @@ def split_topic_text_for_inline_answers(text: str) -> tuple[str, str]:
     return text[: marker_match.start()].strip(), text[marker_match.start() :].strip()
 
 
-def answer_for_topic(unit: TopicUnit, answer_map: dict[str, str], used_keys: set[str]) -> tuple[str, str | None]:
+def answer_key_confidence(unit: TopicUnit, key: str) -> str:
+    if key in {unit.title, canonical_topic_title(unit.title), f"{unit.category}:{unit.number}"}:
+        return "high"
+    return "medium"
+
+
+def answer_for_topic(
+    unit: TopicUnit,
+    parse_result: AnswerParseResult,
+    used_answer_indexes: set[int],
+) -> TopicAnswerMatch:
     for key in topic_answer_keys(unit):
-        if key in answer_map:
-            used_keys.add(key)
-            return answer_map[key], key
-    return "", None
+        if key in parse_result.answer_map:
+            answer_index = parse_result.key_to_answer_index.get(key)
+            if answer_index is not None:
+                used_answer_indexes.add(answer_index)
+            return TopicAnswerMatch(
+                unit=unit,
+                answer_text=parse_result.answer_map[key],
+                match_key=key,
+                confidence=answer_key_confidence(unit, key),
+                answer_index=answer_index,
+            )
+    return TopicAnswerMatch(unit=unit, answer_text="", match_key=None, confidence="none", answer_index=None)
+
+
+def build_topic_answer_matches(topic_units: list[TopicUnit], parse_result: AnswerParseResult) -> tuple[list[TopicAnswerMatch], frozenset[int]]:
+    used_answer_indexes: set[int] = set()
+    matches = [answer_for_topic(unit, parse_result, used_answer_indexes) for unit in topic_units]
+
+    if len(topic_units) == len(parse_result.answer_units):
+        fallback_matches: list[TopicAnswerMatch] = []
+        for index, match in enumerate(matches):
+            if match.answer_text or index in used_answer_indexes:
+                fallback_matches.append(match)
+                continue
+            answer_unit = parse_result.answer_units[index]
+            used_answer_indexes.add(index)
+            fallback_matches.append(
+                TopicAnswerMatch(
+                    unit=match.unit,
+                    answer_text=answer_unit.text,
+                    match_key=f"order:{index + 1}",
+                    confidence="low",
+                    answer_index=index,
+                )
+            )
+        matches = fallback_matches
+
+    unused_answer_indexes = frozenset(set(range(len(parse_result.answer_units))) - used_answer_indexes)
+    return matches, unused_answer_indexes
+
+
+def inline_answer_warnings(analysis: InlineAnswerAnalysis) -> tuple[str, ...]:
+    warnings: list[str] = []
+    if analysis.topic_count == 0:
+        warnings.append("未识别到题目标题")
+    if analysis.answer_count == 0:
+        warnings.append("未识别到答案段落")
+    if analysis.unmatched_topics:
+        warnings.append(f"{analysis.unmatched_topics} 个题目未匹配到答案")
+    if analysis.unused_answers:
+        warnings.append(f"{analysis.unused_answers} 段答案未使用")
+    low_confidence_count = sum(1 for match in analysis.matches if match.confidence == "low")
+    if low_confidence_count:
+        warnings.append(f"{low_confidence_count} 个答案使用顺序兜底匹配")
+    return tuple(warnings)
+
+
+def build_inline_answer_analysis_from_text(source_pages: int, answer_start_page: int, question_text: str, answer_text: str) -> InlineAnswerAnalysis:
+    topic_units = split_topic_units(question_text)
+    topic_categories = {unit.category for unit in topic_units}
+    topic_headings = {unit.heading for unit in topic_units if unit.heading}
+    parse_result = parse_answer_result(answer_text, topic_categories=topic_categories, topic_headings=topic_headings)
+    matches, unused_answer_indexes = build_topic_answer_matches(topic_units, parse_result)
+    analysis = InlineAnswerAnalysis(
+        source_pages=source_pages,
+        answer_start_page=answer_start_page,
+        topic_units=topic_units,
+        answer_units=parse_result.answer_units,
+        matches=matches,
+        unused_answer_indexes=unused_answer_indexes,
+        warnings=(),
+    )
+    return InlineAnswerAnalysis(
+        source_pages=analysis.source_pages,
+        answer_start_page=analysis.answer_start_page,
+        topic_units=analysis.topic_units,
+        answer_units=analysis.answer_units,
+        matches=analysis.matches,
+        unused_answer_indexes=analysis.unused_answer_indexes,
+        warnings=inline_answer_warnings(analysis),
+    )
+
+
+def build_inline_answer_analysis(doc: fitz.Document, answer_start_page: int) -> InlineAnswerAnalysis:
+    question_text = "\n".join(doc[index].get_text() for index in range(0, answer_start_page - 1))
+    answer_text = "\n".join(doc[index].get_text() for index in range(answer_start_page - 1, doc.page_count))
+    return build_inline_answer_analysis_from_text(doc.page_count, answer_start_page, question_text, answer_text)
 
 
 def inline_answer_pair(label: str, answer_text: str) -> list[dict]:
@@ -960,30 +1317,18 @@ def build_inline_answer_slide_specs(
     slide_width_pt: float,
     slide_height_pt: float,
 ) -> tuple[list[tuple[list[dict], list[dict]]], int, int, int, int]:
-    question_text = "\n".join(doc[index].get_text() for index in range(0, answer_start_page - 1))
-    answer_text = "\n".join(doc[index].get_text() for index in range(answer_start_page - 1, doc.page_count))
-    topic_units = split_topic_units(question_text)
-    answer_map = parse_answer_units(answer_text)
-    used_answer_keys: set[str] = set()
+    analysis = build_inline_answer_analysis(doc, answer_start_page)
     slide_specs: list[tuple[list[dict], list[dict]]] = []
-    matched_answers = 0
-    unmatched_topics = 0
     content_width_pt = slide_width_pt - CONTENT_MARGIN_X_PT * 2 - TEXT_INSET_X_PT * 2
     content_height_pt = (slide_height_pt - CONTENT_MARGIN_Y_PT * 2 - TEXT_INSET_Y_PT * 2) * CAPACITY_SAFETY
 
-    for unit in topic_units:
-        answer_text_for_unit, _key = answer_for_topic(unit, answer_map, used_answer_keys)
-        if answer_text_for_unit:
-            matched_answers += 1
-        else:
-            unmatched_topics += 1
-        title, groups = inline_groups_for_topic(unit, answer_text_for_unit)
+    for match in analysis.matches:
+        title, groups = inline_groups_for_topic(match.unit, match.answer_text)
         segments = split_inline_topic_by_capacity(title, groups, width_pt=content_width_pt, max_height_pt=content_height_pt, base_size=15)
         for segment in segments:
             slide_specs.append((segment, []))
 
-    unused_answers = len(set(answer_map) - used_answer_keys)
-    return slide_specs, len(topic_units), matched_answers, unmatched_topics, unused_answers
+    return slide_specs, analysis.topic_count, analysis.matched_answers, analysis.unmatched_topics, analysis.unused_answers
 
 
 def blocks_text_length(blocks: list[dict]) -> int:
@@ -1785,6 +2130,91 @@ def detect_answer_start_page(doc: fitz.Document, profile: ConversionProfile) -> 
     return profile.answer_fallback_page
 
 
+def resolve_inline_answer_start_page(doc: fitz.Document, skip_from_page: int | None, profile: ConversionProfile) -> int:
+    answer_start_page = skip_from_page or detect_answer_start_page(doc, profile)
+    if answer_start_page is None:
+        raise ValueError("Could not detect answer pages for inline answer mode")
+    if answer_start_page <= 1 or answer_start_page > doc.page_count:
+        raise ValueError(f"Invalid answer start page: {answer_start_page}")
+    return answer_start_page
+
+
+def preview_text(text: str, limit: int = 80) -> str:
+    compact = re.sub(r"\s+", " ", text).strip()
+    if len(compact) <= limit:
+        return compact
+    return f"{compact[:limit]}..."
+
+
+def inline_answer_analysis_to_dict(analysis: InlineAnswerAnalysis) -> dict:
+    confidence_counts = {key: 0 for key in CONFIDENCE_LABELS}
+    matches: list[dict] = []
+    for match in analysis.matches:
+        confidence_counts[match.confidence] = confidence_counts.get(match.confidence, 0) + 1
+        matches.append(
+            {
+                "title": match.unit.title,
+                "category": match.unit.category,
+                "number": match.unit.number,
+                "matched": bool(match.answer_text),
+                "confidence": match.confidence,
+                "confidence_label": CONFIDENCE_LABELS.get(match.confidence, match.confidence),
+                "match_key": match.match_key or "",
+                "answer_preview": preview_text(match.answer_text),
+            }
+        )
+
+    unused_answers = [
+        {
+            "title": analysis.answer_units[index].title,
+            "category": analysis.answer_units[index].category,
+            "number": analysis.answer_units[index].number,
+            "answer_preview": preview_text(analysis.answer_units[index].text),
+        }
+        for index in sorted(analysis.unused_answer_indexes)
+    ]
+    return {
+        "source_pages": analysis.source_pages,
+        "answer_start_page": analysis.answer_start_page,
+        "processed_pages": analysis.processed_pages,
+        "topic_count": analysis.topic_count,
+        "answer_count": analysis.answer_count,
+        "matched_answers": analysis.matched_answers,
+        "unmatched_topics": analysis.unmatched_topics,
+        "unused_answers": analysis.unused_answers,
+        "confidence_counts": confidence_counts,
+        "matches": matches,
+        "unmatched_items": [item for item in matches if not item["matched"]],
+        "unused_answer_items": unused_answers,
+        "warnings": list(analysis.warnings),
+    }
+
+
+def precheck_inline_answer_document(
+    doc: fitz.Document,
+    skip_from_page: int | None = 0,
+    profile: str | ConversionProfile = "workbook",
+) -> dict:
+    if doc.page_count == 0:
+        raise ValueError("PDF has no pages")
+    conversion_profile = resolve_profile(profile)
+    answer_start_page = resolve_inline_answer_start_page(doc, skip_from_page, conversion_profile)
+    analysis = build_inline_answer_analysis(doc, answer_start_page)
+    return inline_answer_analysis_to_dict(analysis)
+
+
+def precheck_inline_answers(
+    pdf_path: Path,
+    skip_from_page: int | None = 0,
+    profile: str | ConversionProfile = "workbook",
+) -> dict:
+    doc = fitz.open(pdf_path)
+    try:
+        return precheck_inline_answer_document(doc, skip_from_page=skip_from_page, profile=profile)
+    finally:
+        doc.close()
+
+
 def convert_pdf_to_pptx(
     pdf_path: Path,
     pptx_path: Path,
@@ -1819,11 +2249,7 @@ def convert_pdf_to_pptx(
             skip_from_page = detect_answer_start_page(doc, conversion_profile)
 
         if answer_mode == "inline":
-            answer_start_page = skip_from_page or detect_answer_start_page(doc, conversion_profile)
-            if answer_start_page is None:
-                raise ValueError("Could not detect answer pages for inline answer mode")
-            if answer_start_page <= 1 or answer_start_page > doc.page_count:
-                raise ValueError(f"Invalid answer start page: {answer_start_page}")
+            answer_start_page = resolve_inline_answer_start_page(doc, skip_from_page, conversion_profile)
             slide_specs, topic_count, matched_answers, unmatched_topics, unused_answers = build_inline_answer_slide_specs(
                 doc,
                 answer_start_page,

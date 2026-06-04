@@ -68,6 +68,7 @@ select {
 .ghost-link,
 .download-button,
 .primary-button,
+.secondary-button,
 .generated-actions a,
 .danger-button {
   display: inline-flex;
@@ -291,9 +292,126 @@ select {
   background: var(--blue-dark);
 }
 
+.form-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 104px;
+  gap: 8px;
+}
+
+.secondary-button {
+  border: 1px solid var(--line);
+  background: #ffffff;
+  color: #233142;
+  cursor: pointer;
+}
+
+.secondary-button:hover {
+  border-color: #9dafc3;
+  background: #f7f9fb;
+}
+
 .primary-button.is-loading {
   background: #5b6b7d;
   cursor: progress;
+}
+
+.secondary-button.is-loading {
+  color: #5b6b7d;
+  cursor: progress;
+}
+
+.precheck-panel {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #c7d2df;
+  border-radius: 8px;
+  background: #fbfcfd;
+  padding: 12px;
+}
+
+.precheck-panel[hidden] {
+  display: none;
+}
+
+.precheck-panel.is-good {
+  border-color: #aad5c4;
+  background: #f2fbf7;
+}
+
+.precheck-panel.is-warn {
+  border-color: #e2c28e;
+  background: #fff8ec;
+}
+
+.precheck-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.precheck-title h3 {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.25;
+}
+
+.precheck-title span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.precheck-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.precheck-metrics div {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 8px;
+}
+
+.precheck-metrics dt,
+.precheck-list h4 {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.precheck-metrics dd {
+  margin: 3px 0 0;
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 760;
+  line-height: 1.2;
+}
+
+.precheck-tags,
+.precheck-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.precheck-tags span,
+.precheck-list span {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #ffffff;
+  color: #425064;
+  padding: 5px 7px;
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.precheck-list {
+  display: grid;
 }
 
 .notice-list {
@@ -615,8 +733,13 @@ select {
   }
 
   .segmented-field,
-  .metrics {
+  .metrics,
+  .precheck-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .form-actions {
+    grid-template-columns: 1fr;
   }
 
   .result-header,

@@ -14,6 +14,7 @@ from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 from pdf_text_to_ppt import (
     CONVERSION_PROFILES,
+    build_inline_answer_analysis_from_text,
     block_text,
     convert_pdf_to_pptx,
     join_pdf_lines,
@@ -199,6 +200,41 @@ def test_table_placeholder_uses_profile_rules() -> None:
 
     assert block_text(output[0]) == profile.table_placeholder
     assert len(output) == 1
+
+
+def test_inline_answer_analysis_uses_dynamic_categories_and_comma_numbering() -> None:
+    question_text = "\n".join(
+        [
+            "专题一-小说阅读(1)",
+            "【环境描写】",
+            "例题：分析画线句子的作用。",
+            "【巩固训练】",
+            "结合文章内容作答。",
+            "专题二-古诗鉴赏(1)",
+            "【意象分析】",
+            "例题：诗中意象有什么作用？",
+        ]
+    )
+    answer_text = "\n".join(
+        [
+            "小说阅读",
+            "1、环境描写",
+            "例题作答：写出了环境特点，烘托人物心情。",
+            "巩固训练1答案：结合上下文分析即可。",
+            "古诗鉴赏答案",
+            "1. 意象分析",
+            "例题作答：通过意象表达情感。",
+        ]
+    )
+
+    analysis = build_inline_answer_analysis_from_text(3, 3, question_text, answer_text)
+
+    assert [unit.category for unit in analysis.topic_units] == ["小说阅读", "古诗鉴赏"]
+    assert analysis.answer_count == 2
+    assert analysis.matched_answers == 2
+    assert analysis.unmatched_topics == 0
+    assert {match.confidence for match in analysis.matches} == {"medium"}
+    assert not analysis.warnings
 
 
 def test_image_only_pdf_generates_clean_slide_with_picture(tmp_path: Path) -> None:
